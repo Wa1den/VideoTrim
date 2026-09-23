@@ -56,7 +56,7 @@ public sealed partial class MainWindow : Window
 
     readonly TextBox _startBox = TimeBox(), _endBox = TimeBox();
 
-    readonly ComboBox _language = new() { MinWidth = 120, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0) };
+    readonly ComboBox _language = new() { MinWidth = 120, Height = FieldHeight, VerticalAlignment = VerticalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 8, 0) };
     readonly Button _openBtn, _aboutBtn, _playBtn, _backBtn, _fwdBtn, _startHere, _endHere;
     readonly DispatcherTimer _tick = new() { Interval = TimeSpan.FromMilliseconds(40) };
 
@@ -174,8 +174,11 @@ public sealed partial class MainWindow : Window
         RenderOptions.SetBitmapScalingMode(logo, BitmapScalingMode.HighQuality);
         try { logo.Source = Logo(32); } catch (Exception) { }
 
+        // поле слева у кнопки «О программе» затирает UpdateChromeMetrics, отступ держит список
         _openBtn.Margin = new Thickness(0);
-        _aboutBtn.Margin = new Thickness(12, 0, 0, 0);
+        _openBtn.Height = FieldHeight;
+        _aboutBtn.Height = _aboutBtn.Width = FieldHeight;
+        _aboutBtn.Padding = new Thickness(0);
         WindowChrome.SetIsHitTestVisibleInChrome(_openBtn, true);
         WindowChrome.SetIsHitTestVisibleInChrome(_aboutBtn, true);
         WindowChrome.SetIsHitTestVisibleInChrome(_language, true);
