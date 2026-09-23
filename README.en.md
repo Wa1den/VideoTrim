@@ -5,6 +5,8 @@
 Cuts a clip out of a video through ffmpeg. Resolution, frame rate, codec and bitrate stay as
 in the source by default and can be changed.
 
+![VideoTrim window](docs/screenshot.en.png)
+
 ## Running
 
 Requires the .NET 9 Desktop Runtime and `ffmpeg.exe` with `ffprobe.exe`, either next to the
