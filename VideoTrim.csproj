@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>VideoTrim</RootNamespace>
+    <ApplicationIcon>icon.ico</ApplicationIcon>
+    <AssemblyName>VideoTrim</AssemblyName>
+
+    <!-- ThemeMode (Fluent) is still marked experimental in .NET 9 -->
+    <NoWarn>$(NoWarn);WPF0001</NoWarn>
+
+    <Version>1.0.0</Version>
+    <Product>VideoTrim</Product>
+    <Description>Обрезка видео через ffmpeg</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- и внутрь сборки, чтобы окно и заголовок брали значок оттуда -->
+    <Resource Include="icon.ico" />
+    <None Remove="icon\**" />
+  </ItemGroup>
+
+</Project>
