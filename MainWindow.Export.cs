@@ -46,7 +46,7 @@ public sealed partial class MainWindow
 
     readonly ComboBox _format = new() { Width = 150, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) };
     readonly TextBlock _estimate = new() { FontSize = Ui.TextSize, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 12, 0) };
-    readonly ProgressBar _progress = new() { Width = 160, Height = 4, Maximum = 100, Margin = new Thickness(0, 0, 12, 0), VerticalAlignment = VerticalAlignment.Center };
+    readonly ProgressBar _progress = new() { Width = 160, Height = 8, MinHeight = 8, Maximum = 100, Margin = new Thickness(0, 0, 12, 0), VerticalAlignment = VerticalAlignment.Center };
     Button _exportBtn = null!, _cancelBtn = null!, _showBtn = null!;
 
     List<Encoder> _audioEncoders = [];
@@ -640,13 +640,14 @@ public sealed partial class MainWindow
         _lastOutput = null;
         _progress.Value = 0;
         UpdateEnabled();
-        Say(options.Kind switch
+        string doing = options.Kind switch
         {
-            OutputKind.Gif => Loc.P("Сохранение GIF…", "Saving GIF…"),
-            OutputKind.M4a or OutputKind.Mp3 => Loc.P("Сохранение звука…", "Saving audio…"),
-            _ => options.Video == null ? Loc.P("Копирование фрагмента…", "Copying the clip…")
+            OutputKind.Gif => Loc.P("Сохранение GIF", "Saving GIF"),
+            OutputKind.M4a or OutputKind.Mp3 => Loc.P("Сохранение звука", "Saving audio"),
+            _ => options.Video == null ? Loc.P("Копирование фрагмента", "Copying the clip")
                                        : Loc.P("Кодирование: ", "Encoding: ") + options.Video.Label
-        });
+        };
+        Say(doing + "…");
         var clock = Stopwatch.StartNew();
 
         try
@@ -654,7 +655,11 @@ public sealed partial class MainWindow
             var (code, _, err) = await Media.Run(_ffmpeg, args, _exportCts.Token, line =>
             {
                 if (line.StartsWith("out_time_us=") && long.TryParse(line.AsSpan(12), out long us))
-                    Dispatcher.BeginInvoke(() => _progress.Value = Math.Clamp(us / 1e6 / len, 0, 1) * 100);
+                {
+                    double done = Math.Clamp(us / 1e6 / len, 0, 1);
+                    var elapsed = clock.Elapsed;
+                    Dispatcher.BeginInvoke(() => ShowProgress(doing, done, elapsed));
+                }
             });
 
             if (code == 0)
@@ -688,6 +693,26 @@ public sealed partial class MainWindow
             UpdateEnabled();
             if (_closeAfterExport) Close();
         }
+    }
+
+    /// <summary>
+    /// Percent and the time left, extrapolated from the time spent so far. The first
+    /// seconds of an encode are spent on opening the file and filling the encoder's
+    /// lookahead, so no estimate is shown before 3 % and 2 seconds: it would jump around.
+    /// </summary>
+    void ShowProgress(string doing, double done, TimeSpan elapsed)
+    {
+        if (_exportCts == null) return;
+        _progress.Value = done * 100;
+
+        string text = $"{doing}: {done * 100:0} %";
+        if (done >= 0.03 && done < 1 && elapsed.TotalSeconds >= 2)
+        {
+            double left = elapsed.TotalSeconds * (1 - done) / done;
+            text += ", " + Loc.P("осталось около ", "about ") + TimeText.Format(Math.Ceiling(left), left >= 3600)
+                    + Loc.P("", " left");
+        }
+        Say(text);
     }
 
     static void TryDelete(string path)
