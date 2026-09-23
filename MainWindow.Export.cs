@@ -10,8 +10,12 @@ namespace VideoTrim;
 /// <summary>The export settings card, the status bar with the save button, and the export itself.</summary>
 public sealed partial class MainWindow
 {
-    /// <summary>One height for combo boxes and text boxes: Fluent gives them 36 and 32.</summary>
-    const double FieldHeight = 34;
+    /// <summary>
+    /// One height for combo boxes, text boxes and the buttons beside them. Fluent draws a
+    /// combo box 36 tall and a text box 32; below 36 the combo box cuts off the bottom of
+    /// its text.
+    /// </summary>
+    const double FieldHeight = 36;
 
     static readonly int[] ShortSides = [2160, 1440, 1080, 720, 540, 480, 360, 240];
     static readonly int[] AudioRates = [96, 128, 160, 192, 256, 320];
@@ -151,7 +155,7 @@ public sealed partial class MainWindow
 
         return Ui.Card(Ui.SelectorBar(
             ("Кодирование", video),
-            ("Разрешение", resolution),
+            ("Видео", resolution),
             ("Аудио", audio)));
     }
 
@@ -180,14 +184,13 @@ public sealed partial class MainWindow
         _cancelBtn = Ui.Btn("Отмена", () => _exportCts?.Cancel());
         _showBtn = Ui.Btn("Показать в папке", ShowOutput);
 
-        // список Fluent выше кнопки на 4 точки, а ниже 34 обрезает текст; кнопки
-        // подтягиваются к нему
+        // кнопки той же высоты, что список рядом с ними
         _format.Height = FieldHeight;
         _format.VerticalContentAlignment = VerticalAlignment.Center;
         foreach (var b in new[] { _exportBtn, _cancelBtn, _showBtn }) b.Height = FieldHeight;
 
         _format.ToolTip = Ui.Tip(
-            $"GIF: {Media.GifFps} кадров в секунду, размер с вкладки «Разрешение», а при исходном "
+            $"GIF: {Media.GifFps} кадров в секунду, размер с вкладки «Видео», а при исходном "
             + $"не шире {Media.GifMaxWidth} точек, без звука. Звук: дорожка фрагмента без видео, "
             + "с кодеком и битрейтом с вкладки «Аудио».");
         _estimate.SetResourceReference(TextBlock.ForegroundProperty, "FgDim");
