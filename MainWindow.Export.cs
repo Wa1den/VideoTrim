@@ -20,23 +20,27 @@ public sealed partial class MainWindow
     static readonly int[] ShortSides = [2160, 1440, 1080, 720, 540, 480, 360, 240];
     static readonly int[] AudioRates = [96, 128, 160, 192, 256, 320];
 
-    readonly RadioButton _reencode = new() { Content = "Перекодировать", GroupName = "mode", MinWidth = 0 };
-    readonly RadioButton _copy = new() { Content = "Без перекодирования", GroupName = "mode", MinWidth = 0 };
+    readonly RadioButton _reencode = new() { Content = Loc.T("mode.reencode"), GroupName = "mode", MinWidth = 0 };
+    readonly RadioButton _copy = new() { Content = Loc.T("mode.copy"), GroupName = "mode", MinWidth = 0 };
 
     readonly ComboBox _codec = Combo(280);
     readonly ComboBox _rateMode = Combo(150);
     readonly TextBlock _rateCaption = new() { FontSize = Ui.TextSize, VerticalAlignment = VerticalAlignment.Center };
     readonly TextBlock _rateHelp = Ui.HelpIcon("");
     readonly TextBox _bitrateBox = new() { Width = 110, Height = FieldHeight, VerticalContentAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0) };
-    readonly CheckBox _sameBitrate = Check("исходный");
+    readonly CheckBox _sameBitrate = Check(Loc.T("enc.bitrate.same"));
     readonly ComboBox _quality = Combo(240);
     FrameworkElement _bitrateEditor = null!, _qualityEditor = null!;
 
-    readonly CheckBox _keepAspect = Check("Сохранить пропорции");
+    readonly CheckBox _keepAspect = Check(Loc.T("video.aspect"));
     readonly ComboBox _resolution = Combo(280);
+    readonly ComboBox _fps = Combo(170);
 
-    readonly CheckBox _keepAudio = Check("Сохранить звук");
-    readonly CheckBox _sameAudio = Check("Исходный");
+    /// <summary>15 выбрано самой программой при переходе на GIF, а не пользователем.</summary>
+    bool _fpsAuto;
+
+    readonly CheckBox _keepAudio = Check(Loc.T("audio.keep"));
+    readonly CheckBox _sameAudio = Check(Loc.T("audio.same"));
     readonly ComboBox _audioCodec = Combo(200);
     readonly ComboBox _audioRate = Combo(110);
 
@@ -54,8 +58,16 @@ public sealed partial class MainWindow
     sealed record FrameSize(int Width, int Height, bool Source)
     {
         public override string ToString() =>
-            Source ? $"Исходное, {Width}×{Height}" : $"{Width}×{Height}";
+            Source ? Loc.T("video.size.source", Width, Height) : $"{Width}×{Height}";
     }
+
+    /// <param name="Value">null — исходная частота.</param>
+    sealed record FrameRate(double? Value, string Label)
+    {
+        public override string ToString() => Label;
+    }
+
+    static readonly int[] StandardRates = [60, 50, 30, 25, 24, 20, 15, 12, 10];
 
     sealed record Format(OutputKind Kind, string Ext, string Label)
     {
@@ -82,20 +94,13 @@ public sealed partial class MainWindow
     {
         // кодирование
         var modes = Ui.Row(
-            Ui.WithHelpIcon(_reencode,
-                "Фрагмент начинается и заканчивается ровно на выбранных секундах. Видео кодируется "
-                + "заново по настройкам на вкладках. Время зависит от кодировщика и "
-                + "разрешения: 15 секунд 720p через x264 сохраняются примерно за 2 секунды."),
+            Ui.WithHelpIcon(_reencode, Loc.T("mode.reencode.note")),
             Spacer(24),
-            Ui.WithHelpIcon(_copy,
-                "Потоки копируются как есть: качество не меняется, сохранение занимает секунды, "
-                + "настройки на вкладках не действуют. Начало сдвигается назад к ближайшему "
-                + "ключевому кадру, поэтому фрагмент может начаться на несколько секунд раньше "
-                + "выбранного."));
+            Ui.WithHelpIcon(_copy, Loc.T("mode.copy.note")));
         modes.Margin = new Thickness(0, 0, 0, 2);
 
-        _rateMode.Items.Add("По битрейту");
-        _rateMode.Items.Add("По качеству");
+        _rateMode.Items.Add(Loc.T("enc.mode.bitrate"));
+        _rateMode.Items.Add(Loc.T("enc.mode.quality"));
 
         var bitrate = new StackPanel { Orientation = Orientation.Horizontal, Children = { _bitrateBox, _sameBitrate } };
         _bitrateEditor = bitrate;
@@ -110,25 +115,15 @@ public sealed partial class MainWindow
         var video = new StackPanel();
         video.Children.Add(modes);
         video.Children.Add(Ui.Row(
-            Ui.Labeled("Кодек", _codec,
-                "По умолчанию тот же формат, что в исходнике, и процессорный кодировщик. "
-                + "Кодировщики видеокарты разгружают процессор, но при том же битрейте дают "
-                + "картинку хуже."),
-            Ui.Labeled("Режим", _rateMode,
-                "По битрейту размер файла известен заранее, а качество плавает: сложные сцены "
-                + "выходят хуже простых. По качеству наоборот: картинка ровная, а размер "
-                + "зависит от содержимого."),
+            Ui.Labeled(Loc.T("enc.codec"), _codec, Loc.T("enc.codec.note")),
+            Ui.Labeled(Loc.T("enc.mode"), _rateMode, Loc.T("enc.mode.note")),
             rate));
 
         // разрешение
         var resolution = Ui.Row(
-            Ui.Labeled("Размер кадра", _resolution,
-                "Уменьшение кадра масштабированием Lanczos. С пропорциями список идёт от "
-                + "исходного размера вниз по стандартным высотам. Без них предлагаются размеры "
-                + "16:9, и кадр другой формы растягивается до них."),
-            Beside(Ui.WithHelpIcon(_keepAspect,
-                "Высота выбирается из стандартных, ширина считается по пропорциям исходного кадра "
-                + "и округляется до чётной: кодировщики требуют чётных размеров.")));
+            Ui.Labeled(Loc.T("video.size"), _resolution, Loc.T("video.size.note")),
+            Beside(Ui.WithHelpIcon(_keepAspect, Loc.T("video.aspect.note"))),
+            Ui.Labeled(Loc.T("video.fps"), _fps, Loc.T("video.fps.note")));
 
         // аудио: галки над полями, «Сохранить звук» над кодеком, «Исходный» над битрейтом
         var audio = new Grid();
@@ -137,11 +132,11 @@ public sealed partial class MainWindow
         audio.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         audio.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-        var keep = Ui.WithHelpIcon(_keepAudio, "Без галки фрагмент сохраняется без звуковой дорожки.");
-        var same = Ui.WithHelpIcon(_sameAudio, "Звук копируется без перекодирования, с исходными кодеком и битрейтом.");
+        var keep = Ui.WithHelpIcon(_keepAudio, Loc.T("audio.keep.note"));
+        var same = Ui.WithHelpIcon(_sameAudio, Loc.T("audio.same.note"));
         keep.Margin = same.Margin = new Thickness(0, 6, 16, 2);
-        var audioCodec = Ui.Labeled("Кодек", _audioCodec);
-        var audioRate = Ui.Labeled("Битрейт, кбит/с", _audioRate, "FLAC сжимает без потерь, битрейт у него не задаётся.");
+        var audioCodec = Ui.Labeled(Loc.T("audio.codec"), _audioCodec);
+        var audioRate = Ui.Labeled(Loc.T("audio.bitrate"), _audioRate, Loc.T("audio.bitrate.note"));
 
         foreach (var (e, row, col) in new (UIElement, int, int)[] { (keep, 0, 0), (same, 0, 1), (audioCodec, 1, 0), (audioRate, 1, 1) })
         {
@@ -154,9 +149,9 @@ public sealed partial class MainWindow
         _audioRate.SelectedItem = 192;
 
         return Ui.Card(Ui.SelectorBar(
-            ("Кодирование", video),
-            ("Видео", resolution),
-            ("Аудио", audio)));
+            (Loc.T("tab.encoding"), video),
+            (Loc.T("tab.video"), resolution),
+            (Loc.T("tab.audio"), audio)));
     }
 
     /// <summary>
@@ -180,23 +175,18 @@ public sealed partial class MainWindow
     /// </summary>
     FrameworkElement BuildStatusBar()
     {
-        _exportBtn = Ui.Btn("Сохранить фрагмент…", Export, accent: true);
-        _cancelBtn = Ui.Btn("Отмена", () => _exportCts?.Cancel());
-        _showBtn = Ui.Btn("Показать в папке", ShowOutput);
+        _exportBtn = Ui.Btn(Loc.T("export.save"), Export, accent: true);
+        _cancelBtn = Ui.Btn(Loc.T("export.cancel"), () => _exportCts?.Cancel());
+        _showBtn = Ui.Btn(Loc.T("export.show"), ShowOutput);
 
         // кнопки той же высоты, что список рядом с ними
         _format.Height = FieldHeight;
         _format.VerticalContentAlignment = VerticalAlignment.Center;
         foreach (var b in new[] { _exportBtn, _cancelBtn, _showBtn }) b.Height = FieldHeight;
 
-        _format.ToolTip = Ui.Tip(
-            $"GIF: {Media.GifFps} кадров в секунду, размер с вкладки «Видео», а при исходном "
-            + $"не шире {Media.GifMaxWidth} точек, без звука. Звук: дорожка фрагмента без видео, "
-            + "с кодеком и битрейтом с вкладки «Аудио».");
+        _format.ToolTip = Ui.Tip(Loc.T("format.note", Media.GifMaxWidth));
         _estimate.SetResourceReference(TextBlock.ForegroundProperty, "FgDim");
-        _estimate.ToolTip = Ui.Tip(
-            "Оценка по битрейту и длине фрагмента. В режиме качества и для GIF размер зависит "
-            + "от содержимого и заранее неизвестен.");
+        _estimate.ToolTip = Ui.Tip(Loc.T("export.estimate.note"));
 
         _status.TextAlignment = TextAlignment.Right;
         _status.VerticalAlignment = VerticalAlignment.Center;
@@ -219,9 +209,11 @@ public sealed partial class MainWindow
         // у списков подпись стоит отдельным текстом; экранный диктор без имени читает «список»
         foreach (var (c, name) in new (Control, string)[]
                  {
-                     (_codec, "Кодек"), (_rateMode, "Режим"), (_quality, "Качество"), (_bitrateBox, "Битрейт"),
-                     (_resolution, "Размер кадра"), (_audioCodec, "Кодек звука"), (_audioRate, "Битрейт звука"),
-                     (_format, "Формат")
+                     (_codec, Loc.T("enc.codec")), (_rateMode, Loc.T("enc.mode")), (_quality, Loc.T("enc.quality")),
+                     (_bitrateBox, Loc.T("enc.bitrate")),
+                     (_resolution, Loc.T("video.size")), (_fps, Loc.T("video.fps")),
+                     (_audioCodec, Loc.T("audio.codec")), (_audioRate, Loc.T("audio.bitrate")),
+                     (_format, Loc.P("Формат", "Format"))
                  })
             System.Windows.Automation.AutomationProperties.SetName(c, name);
 
@@ -254,7 +246,8 @@ public sealed partial class MainWindow
         }
         _audioCodec.SelectionChanged += (_, _) => UpdateEnabled();
         _audioRate.SelectionChanged += (_, _) => UpdateEstimate();
-        _format.SelectionChanged += (_, _) => UpdateEnabled();
+        _format.SelectionChanged += (_, _) => FormatChanged();
+        _fps.SelectionChanged += (_, _) => { if (!_rebuildingUi) _fpsAuto = false; };
     }
 
     async Task FillCodecs(VideoInfo info)
@@ -286,23 +279,26 @@ public sealed partial class MainWindow
         // форматы: звук предлагается, только если он есть и есть чем его записать
         _format.Items.Clear();
         var ext = Path.GetExtension(info.Path).ToLowerInvariant();
-        _format.Items.Add(new Format(OutputKind.Video, ext, "Видео, " + ext));
-        _format.Items.Add(new Format(OutputKind.Gif, ".gif", "GIF"));
+        _format.Items.Add(new Format(OutputKind.Video, ext, Loc.T("format.video", ext)));
+        _format.Items.Add(new Format(OutputKind.Gif, ".gif", Loc.T("format.gif")));
         if (info.AudioCodec != null && (info.AudioCodec == "aac" || audio.Any(e => e.Codec == "aac")))
-            _format.Items.Add(new Format(OutputKind.M4a, ".m4a", "Звук, .m4a"));
+            _format.Items.Add(new Format(OutputKind.M4a, ".m4a", Loc.T("format.m4a")));
         if (info.AudioCodec != null && (info.AudioCodec == "mp3" || audio.Any(e => e.Codec == "mp3")))
-            _format.Items.Add(new Format(OutputKind.Mp3, ".mp3", "Звук, .mp3"));
+            _format.Items.Add(new Format(OutputKind.Mp3, ".mp3", Loc.T("format.mp3")));
         _format.SelectedIndex = 0;
         _rebuildingUi = false;
 
         FillQuality();
         FillResolutions();
+        FillFrameRates();
         ApplySameBitrate();
 
         if (list.Count == 0)
-            Say("Кодировщиков в этой сборке ffmpeg не найдено, доступно только сохранение без перекодирования");
+            Say(Loc.P("Кодировщиков в этой сборке ffmpeg не найдено, доступно только сохранение без перекодирования",
+                      "This ffmpeg build has no encoders, only saving without re-encoding is available"));
         else if (_sameEncoder == null)
-            Say($"Кодировщика {info.CodecName} в этой сборке ffmpeg нет, для перекодирования выбран {list[0].Label}");
+            Say(Loc.P($"Кодировщика {info.CodecName} в этой сборке ffmpeg нет, для перекодирования выбран {list[0].Label}",
+                      $"This ffmpeg build has no {info.CodecName} encoder, {list[0].Label} is chosen for re-encoding"));
 
         UpdateEnabled();
     }
@@ -316,7 +312,7 @@ public sealed partial class MainWindow
         _quality.Items.Clear();
         if (_codec.SelectedItem is Encoder enc && Media.QualityScale(enc.Name) is var (param, values))
             for (int i = 0; i < values.Length; i++)
-                _quality.Items.Add($"{Media.QualityNames[i]}, {param} {values[i]}");
+                _quality.Items.Add($"{Loc.T("quality." + i)}, {param} {values[i]}");
         _quality.SelectedIndex = _quality.Items.Count > 0 ? level : -1;
         _rebuildingUi = false;
     }
@@ -346,6 +342,51 @@ public sealed partial class MainWindow
 
         _resolution.SelectedItem = _resolution.Items.Cast<FrameSize>().FirstOrDefault(s => s.ToString() == previous)
                                    ?? _resolution.Items[0];
+    }
+
+    /// <summary>
+    /// The source rate and the standard ones below it. Nothing above the source: the fps
+    /// filter would only repeat frames, and the file would grow with nothing gained.
+    /// </summary>
+    void FillFrameRates()
+    {
+        if (_info is not VideoInfo v) return;
+
+        _rebuildingUi = true;
+        _fps.Items.Clear();
+        string source = v.Fps > 0 ? v.Fps.ToString("0.###", Num) : "?";
+        _fps.Items.Add(new FrameRate(null, Loc.T("video.fps.source", source)));
+        foreach (int r in StandardRates.Where(r => v.Fps <= 0 || r < v.Fps - 0.5))
+            _fps.Items.Add(new FrameRate(r, r.ToString(CultureInfo.InvariantCulture)));
+        _fps.SelectedIndex = 0;
+        _fpsAuto = false;
+        _rebuildingUi = false;
+    }
+
+    /// <summary>
+    /// GIF stores every frame as a full picture with its own palette, so 30 frames per
+    /// second take twice the size of 15. Switching to GIF picks 15 unless the rate was
+    /// chosen by hand, and switching back returns what was there.
+    /// </summary>
+    void FormatChanged()
+    {
+        if (!_rebuildingUi)
+        {
+            var gifRate = _fps.Items.Cast<FrameRate>().FirstOrDefault(r => r.Value == Media.GifFps);
+            _rebuildingUi = true;
+            if (Kind == OutputKind.Gif && _fps.SelectedItem is FrameRate { Value: null } && gifRate != null)
+            {
+                _fps.SelectedItem = gifRate;
+                _fpsAuto = true;
+            }
+            else if (Kind != OutputKind.Gif && _fpsAuto)
+            {
+                _fps.SelectedIndex = 0;
+                _fpsAuto = false;
+            }
+            _rebuildingUi = false;
+        }
+        UpdateEnabled();
     }
 
     /// <summary>The source bitrate, brought down with the frame when the frame is made smaller.</summary>
@@ -419,18 +460,11 @@ public sealed partial class MainWindow
         bool showQuality = byQuality && hasQuality;
         _bitrateEditor.Visibility = showQuality ? Visibility.Hidden : Visibility.Visible;
         _qualityEditor.Visibility = showQuality ? Visibility.Visible : Visibility.Hidden;
-        _rateCaption.Text = showQuality ? "Качество" : "Битрейт, кбит/с";
-        ((TextBlock)_rateHelp.ToolTip).Text = showQuality
-            ? "Качество держится постоянным, а битрейт меняется от сцены к сцене: на сложных "
-              + "он выше, на простых ниже. «Высокое» у x264 — CRF 20, «Среднее» — CRF 23, "
-              + "значение x264 по умолчанию. Чем больше число, тем меньше файл и хуже картинка."
-            : "Средний битрейт видеопотока. Исходный берётся из файла, а если в файле его нет, "
-              + "считается по размеру и длительности. При уменьшении кадра исходный битрейт "
-              + "снижается вместе с ним: 1080p → 720p оставляет 54 %. Пустое поле оставляет "
-              + "выбор кодировщику.";
+        _rateCaption.Text = Loc.T(showQuality ? "enc.quality" : "enc.bitrate");
+        ((TextBlock)_rateHelp.ToolTip).Text = Loc.T(showQuality ? "enc.quality.note" : "enc.bitrate.note");
 
         bool frame = (encode || kind == OutputKind.Gif) && !busy;
-        _keepAspect.IsEnabled = _resolution.IsEnabled = frame;
+        _keepAspect.IsEnabled = _resolution.IsEnabled = _fps.IsEnabled = frame;
 
         bool hasAudio = _info?.AudioCodec != null;
         bool audioVideo = encode && hasAudio;
@@ -496,9 +530,9 @@ public sealed partial class MainWindow
 
         if (kbps <= 0) return;
         double bytes = kbps * 1000 / 8 * seconds * 1.01;   // процент на контейнер
-        _estimate.Text = "≈ " + (bytes >= 1e9 ? (bytes / 1e9).ToString("0.0", Ru) + " ГБ"
-                               : bytes >= 1e6 ? (bytes / 1e6).ToString(bytes >= 1e8 ? "0" : "0.0", Ru) + " МБ"
-                               : (bytes / 1e3).ToString("0", Ru) + " КБ");
+        _estimate.Text = "≈ " + (bytes >= 1e9 ? (bytes / 1e9).ToString("0.0", Num) + Loc.P(" ГБ", " GB")
+                               : bytes >= 1e6 ? (bytes / 1e6).ToString(bytes >= 1e8 ? "0" : "0.0", Num) + Loc.P(" МБ", " MB")
+                               : (bytes / 1e3).ToString("0", Num) + Loc.P(" КБ", " KB"));
     }
 
     ExportOptions? ReadOptions(VideoInfo info)
@@ -507,24 +541,30 @@ public sealed partial class MainWindow
         var size = _resolution.SelectedItem as FrameSize;
         (int, int)? scale = size is { Source: false } ? (size.Width, size.Height) : null;
         int? audioKbps = _audioRate.SelectedItem as int?;
+        double? fps = (_fps.SelectedItem as FrameRate)?.Value;
 
         switch (kind)
         {
             case OutputKind.Gif:
-                return new ExportOptions(kind, null, null, null, scale, false, null, null);
+                // для GIF «исходная» значит частоту исходника, а не 15 по умолчанию
+                return new ExportOptions(kind, null, null, null, scale, fps ?? (info.Fps > 0 ? info.Fps : null), false, null, null);
 
             case OutputKind.M4a or OutputKind.Mp3:
             {
                 bool copy = _sameAudio.IsEnabled && _sameAudio.IsChecked == true;
                 var codec = kind == OutputKind.M4a ? "aac" : "mp3";
                 var enc = copy ? null : _audioEncoders.FirstOrDefault(e => e.Codec == codec);
-                if (!copy && enc == null) { Say("В этой сборке ffmpeg нет кодировщика для " + codec); return null; }
-                return new ExportOptions(kind, null, null, null, null, true, enc, audioKbps);
+                if (!copy && enc == null)
+                {
+                    Say(Loc.P("В этой сборке ffmpeg нет кодировщика для ", "This ffmpeg build has no encoder for ") + codec);
+                    return null;
+                }
+                return new ExportOptions(kind, null, null, null, null, null, true, enc, audioKbps);
             }
         }
 
         if (_reencode.IsChecked != true)
-            return new ExportOptions(kind, null, null, null, null, true, null, null);
+            return new ExportOptions(kind, null, null, null, null, null, true, null, null);
 
         if (_codec.SelectedItem is not Encoder encoder) return null;
 
@@ -541,7 +581,8 @@ public sealed partial class MainWindow
             {
                 if (!long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out long k) || k <= 0)
                 {
-                    Say("Битрейт — целое число килобит в секунду, например 8000");
+                    Say(Loc.P("Битрейт — целое число килобит в секунду, например 8000",
+                              "The bitrate is a whole number of kilobits per second, such as 8000"));
                     return null;
                 }
                 kbps = k;
@@ -551,7 +592,7 @@ public sealed partial class MainWindow
         bool keepAudio = info.AudioCodec != null && _keepAudio.IsChecked == true;
         var audioEncoder = keepAudio && _sameAudio.IsChecked != true ? _audioCodec.SelectedItem as Encoder : null;
 
-        return new ExportOptions(kind, encoder, kbps, quality, scale, keepAudio, audioEncoder, audioKbps);
+        return new ExportOptions(kind, encoder, kbps, quality, scale, fps, keepAudio, audioEncoder, audioKbps);
     }
 
     async void Export()
@@ -565,8 +606,8 @@ public sealed partial class MainWindow
         string what = options.Kind switch
         {
             OutputKind.Gif => "GIF",
-            OutputKind.M4a or OutputKind.Mp3 => "Звук",
-            _ => "Видео"
+            OutputKind.M4a or OutputKind.Mp3 => Loc.P("Звук", "Audio"),
+            _ => Loc.P("Видео", "Video")
         };
 
         string Stamp(double t) => TimeText.Format(t, Hours, true).Replace(':', '-').Replace(',', '.');
@@ -574,7 +615,7 @@ public sealed partial class MainWindow
         {
             FileName = $"{Path.GetFileNameWithoutExtension(info.Path)}_{Stamp(start)}_{Stamp(end)}{ext}",
             InitialDirectory = Directory.Exists(_cfg.SaveDir) ? _cfg.SaveDir : Path.GetDirectoryName(info.Path),
-            Filter = $"{what} (*{ext})|*{ext}|Все файлы|*.*",
+            Filter = $"{what} (*{ext})|*{ext}|{Loc.P("Все файлы", "All files")}|*.*",
             DefaultExt = ext,
             AddExtension = true,
             OverwritePrompt = true
@@ -587,7 +628,7 @@ public sealed partial class MainWindow
             : Path.Combine(dlg.InitialDirectory ?? Path.GetDirectoryName(info.Path)!, dlg.FileName);
         if (string.Equals(Path.GetFullPath(output), Path.GetFullPath(info.Path), StringComparison.OrdinalIgnoreCase))
         {
-            Say("Фрагмент нельзя записать поверх исходного файла");
+            Say(Loc.P("Фрагмент нельзя записать поверх исходного файла", "The clip cannot overwrite the source file"));
             return;
         }
         _cfg.SaveDir = Path.GetDirectoryName(output);
@@ -601,9 +642,10 @@ public sealed partial class MainWindow
         UpdateEnabled();
         Say(options.Kind switch
         {
-            OutputKind.Gif => "Сохранение GIF…",
-            OutputKind.M4a or OutputKind.Mp3 => "Сохранение звука…",
-            _ => options.Video == null ? "Копирование фрагмента…" : "Кодирование: " + options.Video.Label
+            OutputKind.Gif => Loc.P("Сохранение GIF…", "Saving GIF…"),
+            OutputKind.M4a or OutputKind.Mp3 => Loc.P("Сохранение звука…", "Saving audio…"),
+            _ => options.Video == null ? Loc.P("Копирование фрагмента…", "Copying the clip…")
+                                       : Loc.P("Кодирование: ", "Encoding: ") + options.Video.Label
         });
         var clock = Stopwatch.StartNew();
 
@@ -618,25 +660,26 @@ public sealed partial class MainWindow
             if (code == 0)
             {
                 _lastOutput = output;
-                Say($"Сохранено за {clock.Elapsed.TotalSeconds.ToString("0.#", Ru)} с, "
-                    + $"{new FileInfo(output).Length / 1e6:0.#} МБ: {output}");
+                string took = clock.Elapsed.TotalSeconds.ToString("0.#", Num);
+                string size = (new FileInfo(output).Length / 1e6).ToString("0.#", Num);
+                Say(Loc.P($"Сохранено за {took} с, {size} МБ: {output}", $"Saved in {took} s, {size} MB: {output}"));
             }
             else
             {
                 TryDelete(output);
-                Say("ffmpeg завершился с ошибкой, файл не сохранён");
-                MessageBox.Show(this, Media.LastLines(err, 8), "Ошибка ffmpeg", MessageBoxButton.OK, MessageBoxImage.Error);
+                Say(Loc.P("ffmpeg завершился с ошибкой, файл не сохранён", "ffmpeg stopped with an error, the file is not saved"));
+                MessageBox.Show(this, Media.LastLines(err, 8), Loc.P("Ошибка ffmpeg", "ffmpeg error"), MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
         catch (OperationCanceledException)
         {
             TryDelete(output);
-            Say("Сохранение отменено");
+            Say(Loc.P("Сохранение отменено", "Saving cancelled"));
         }
         catch (Exception ex)
         {
             TryDelete(output);
-            Say("Не удалось запустить ffmpeg: " + ex.Message);
+            Say(Loc.P("Не удалось запустить ffmpeg: ", "Could not start ffmpeg: ") + ex.Message);
         }
         finally
         {

@@ -54,7 +54,7 @@ public static class FfmpegSetup
                 var entry = archive.Entries.FirstOrDefault(e =>
                                 e.Name.Equals(exe, StringComparison.OrdinalIgnoreCase)
                                 && e.FullName.Contains("/bin/", StringComparison.OrdinalIgnoreCase))
-                            ?? throw new InvalidDataException("в архиве нет " + exe);
+                            ?? throw new InvalidDataException(Loc.P("в архиве нет ", "the archive has no ") + exe);
                 entry.ExtractToFile(Path.Combine(target, exe), overwrite: true);
             }
             return target;

@@ -8,7 +8,10 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
+        var cfg = Config.Load();
+        Loc.Load(cfg.Language ?? Loc.SystemDefault());
+
         // файл можно передать аргументом или перетащить на exe
-        new MainWindow(e.Args.FirstOrDefault()).Show();
+        new MainWindow(e.Args.FirstOrDefault(), cfg).Show();
     }
 }

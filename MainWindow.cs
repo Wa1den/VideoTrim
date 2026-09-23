@@ -14,9 +14,15 @@ namespace VideoTrim;
 
 public sealed partial class MainWindow : Window
 {
-    static readonly CultureInfo Ru = CultureInfo.GetCultureInfo("ru-RU");
+    /// <summary>Десятичная запятая по-русски, точка на остальных языках.</summary>
+    static CultureInfo Num => Loc.Language == "ru" ? CultureInfo.GetCultureInfo("ru-RU") : CultureInfo.InvariantCulture;
 
-    readonly Config _cfg = Config.Load();
+    /// <summary>Что переносится в окно, пересозданное при смене языка.</summary>
+    public sealed record Restore(string Path, double Start, double End, double Position);
+
+    readonly Config _cfg;
+    readonly Restore? _restore;
+    double? _pendingSeek;
     string? _ffmpeg = Media.Find("ffmpeg");
     string? _ffprobe = Media.Find("ffprobe");
     Task<(List<Encoder> Video, List<Encoder> Audio)> _encoders;
@@ -33,7 +39,7 @@ public sealed partial class MainWindow : Window
     readonly Image _still = new() { Stretch = Stretch.Uniform, Visibility = Visibility.Collapsed };
     readonly TextBlock _placeholder = new()
     {
-        Text = "Перетащите видео в окно или откройте его кнопкой «Открыть»",
+        Text = Loc.T("app.placeholder"),
         Foreground = Brushes.Gray,
         FontSize = Ui.TextSize,
         HorizontalAlignment = HorizontalAlignment.Center,
@@ -50,6 +56,7 @@ public sealed partial class MainWindow : Window
 
     readonly TextBox _startBox = TimeBox(), _endBox = TimeBox();
 
+    readonly ComboBox _language = new() { MinWidth = 120, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0) };
     readonly Button _openBtn, _aboutBtn, _playBtn, _backBtn, _fwdBtn, _startHere, _endHere;
     readonly DispatcherTimer _tick = new() { Interval = TimeSpan.FromMilliseconds(40) };
 
@@ -63,8 +70,11 @@ public sealed partial class MainWindow : Window
 
     bool Hours => _info?.Duration >= 3600;
 
-    public MainWindow(string? path)
+    public MainWindow(string? path, Config cfg, Restore? restore = null)
     {
+        _cfg = cfg;
+        _restore = restore;
+        path ??= restore?.Path;
         Title = "VideoTrim";
         Width = 1040;
         Height = 800;
@@ -75,18 +85,24 @@ public sealed partial class MainWindow : Window
         SetupChrome();
         try { Icon = BitmapFrame.Create(new Uri("pack://application:,,,/icon.ico")); } catch (Exception) { }
 
-        _openBtn = Ui.Btn("Открыть…", PickFile);
-        _aboutBtn = Ui.IconBtn("", () => new AboutWindow(this, _ffmpeg, _cfg, _update).ShowDialog(), "О программе");
-        _playBtn = Ui.IconBtn("", TogglePlay, "Воспроизведение и пауза, пробел");
-        _backBtn = Ui.Btn("−1 с", () => Seek(_timeline.Position - 1), tip: "Стрелка влево, с Shift на 10 секунд");
-        _fwdBtn = Ui.Btn("+1 с", () => Seek(_timeline.Position + 1), tip: "Стрелка вправо, с Shift на 10 секунд");
-        _startHere = Ui.Btn("Отсюда", StartHere, tip: "Начало фрагмента на текущей секунде, клавиша I");
-        _endHere = Ui.Btn("Досюда", EndHere, tip: "Конец фрагмента после текущей секунды, клавиша O");
+        _openBtn = Ui.Btn(Loc.T("app.open"), PickFile);
+        _aboutBtn = Ui.IconBtn("", () => new AboutWindow(this, _ffmpeg, _cfg, _update).ShowDialog(), Loc.T("app.about"));
+        _playBtn = Ui.IconBtn("", TogglePlay, Loc.T("play.toggle"));
+        _backBtn = Ui.Btn(Loc.T("play.back"), () => Seek(_timeline.Position - 1), tip: Loc.T("play.back.note"));
+        _fwdBtn = Ui.Btn(Loc.T("play.forward"), () => Seek(_timeline.Position + 1), tip: Loc.T("play.forward.note"));
+        _startHere = Ui.Btn(Loc.T("range.fromhere"), StartHere, tip: Loc.T("range.fromhere.note"));
+        _endHere = Ui.Btn(Loc.T("range.tohere"), EndHere, tip: Loc.T("range.tohere.note"));
         Content = Build();
 
         _encoders = _ffmpeg == null ? Task.FromResult((new List<Encoder>(), new List<Encoder>())) : Media.DetectEncoders(_ffmpeg);
 
-        _media.MediaOpened += (_, _) => { if (!_media.HasVideo) EnterStillMode(false); };
+        _media.MediaOpened += (_, _) =>
+        {
+            if (!_media.HasVideo) EnterStillMode(false);
+
+            // позиция, заданная до открытия файла, проигрывателем не принимается
+            if (_pendingSeek is double t) { _pendingSeek = null; Seek(t); }
+        };
         _media.MediaFailed += (_, _) => EnterStillMode(true);
         _media.MediaEnded += (_, _) => SetPlaying(false);
 
@@ -122,7 +138,7 @@ public sealed partial class MainWindow : Window
         Loaded += (_, _) =>
         {
             if (_ffmpeg == null || _ffprobe == null) OfferFfmpeg(path);
-            else if (path != null) Open(path);
+            else if (path != null) Open(path, _restore);
             if (_cfg.CheckUpdates) CheckUpdates();
         };
     }
@@ -162,7 +178,19 @@ public sealed partial class MainWindow : Window
         _aboutBtn.Margin = new Thickness(12, 0, 0, 0);
         WindowChrome.SetIsHitTestVisibleInChrome(_openBtn, true);
         WindowChrome.SetIsHitTestVisibleInChrome(_aboutBtn, true);
+        WindowChrome.SetIsHitTestVisibleInChrome(_language, true);
         _titleRight = _aboutBtn;
+
+        _rebuildingUi = true;
+        foreach (var code in Loc.Available)
+            _language.Items.Add(new ComboBoxItem { Content = Loc.DisplayName(code), Tag = code });
+        _language.SelectedItem = _language.Items.Cast<ComboBoxItem>().FirstOrDefault(i => (string)i.Tag == Loc.Language);
+        _rebuildingUi = false;
+        _language.SelectionChanged += (_, _) =>
+        {
+            if (_language.SelectedItem is ComboBoxItem { Tag: string code }) SwitchLanguage(code);
+        };
+        System.Windows.Automation.AutomationProperties.SetName(_language, Loc.T("app.language"));
 
         var names = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0) };
         names.Children.Add(_fileName);
@@ -172,9 +200,11 @@ public sealed partial class MainWindow : Window
         DockPanel.SetDock(logo, Dock.Left);
         DockPanel.SetDock(_openBtn, Dock.Left);
         DockPanel.SetDock(_aboutBtn, Dock.Right);
+        DockPanel.SetDock(_language, Dock.Right);
         header.Children.Add(logo);
         header.Children.Add(_openBtn);
         header.Children.Add(_aboutBtn);
+        header.Children.Add(_language);
         header.Children.Add(names);
         Place(grid, header, 0);
         ShowFile();
@@ -200,7 +230,7 @@ public sealed partial class MainWindow : Window
         // воспроизведение и фрагмент одной строкой под таймлайном
         CommitOnEnter(_startBox, v => _timeline.SetStart(v));
         CommitOnEnter(_endBox, v => _timeline.SetEnd(v));
-        _startBox.ToolTip = Ui.Tip("Минуты и секунды через двоеточие, например 1:25, или часы, минуты и секунды: 1:02:05");
+        _startBox.ToolTip = Ui.Tip(Loc.T("range.time.note"));
         _endBox.ToolTip = _startBox.ToolTip;
         _time.Margin = new Thickness(6, 0, 0, 0);
 
@@ -211,9 +241,9 @@ public sealed partial class MainWindow : Window
         controls.Children.Add(Ui.Row(
             _playBtn, _backBtn, _fwdBtn, _time,
             Spacer(28),
-            Ui.Caption("Начало"), _startBox, _startHere,
+            Ui.Caption(Loc.T("range.start")), _startBox, _startHere,
             Spacer(16),
-            Ui.Caption("Конец"), _endBox, _endHere));
+            Ui.Caption(Loc.T("range.end")), _endBox, _endHere));
         Place(grid, controls, 3);
 
         Place(grid, BuildExportCard(), 4);
@@ -257,7 +287,8 @@ public sealed partial class MainWindow : Window
     {
         var dlg = new OpenFileDialog
         {
-            Filter = "Видео|*.mp4;*.mkv;*.mov;*.avi;*.webm;*.m4v;*.ts;*.mts;*.m2ts;*.wmv;*.flv;*.3gp|Все файлы|*.*",
+            Filter = Loc.P("Видео", "Video") + "|*.mp4;*.mkv;*.mov;*.avi;*.webm;*.m4v;*.ts;*.mts;*.m2ts;*.wmv;*.flv;*.3gp|"
+                     + Loc.P("Все файлы", "All files") + "|*.*",
             InitialDirectory = Directory.Exists(_cfg.OpenDir) ? _cfg.OpenDir : ""
         };
         if (dlg.ShowDialog(this) == true) Open(dlg.FileName);
@@ -272,13 +303,14 @@ public sealed partial class MainWindow : Window
         var result = await UpdateCheck.Check();
         _update = result;
         if (result.Newer != null && _exportCts == null)
-            Say($"Доступна версия {result.Newer}, ссылка на неё в «О программе»");
+            Say(Loc.P($"Доступна версия {result.Newer}, ссылка на неё в «О программе»",
+                      $"Version {result.Newer} is available, the link is in About"));
     }
 
     void ShowFile()
     {
         _fileName.Text = _info == null ? "VideoTrim" : Path.GetFileName(_info.Path);
-        _fileInfo.Text = _info == null ? "Файл не открыт" : Describe(_info);
+        _fileInfo.Text = _info == null ? Loc.T("app.nofile") : Describe(_info);
     }
 
     /// <summary>
@@ -290,36 +322,41 @@ public sealed partial class MainWindow : Window
         if (_installing) return;
 
         var answer = MessageBox.Show(this,
-            "ffmpeg.exe и ffprobe.exe не найдены ни рядом с программой, ни в PATH, а без них "
-            + "видео не открывается.\n\nСкачать сборку ffmpeg с gyan.dev (около 115 МБ) и положить "
-            + "её рядом с программой?",
+            Loc.P("ffmpeg.exe и ffprobe.exe не найдены ни рядом с программой, ни в PATH, а без них "
+                  + "видео не открывается.\n\nСкачать сборку ffmpeg с gyan.dev (около 115 МБ) и положить "
+                  + "её рядом с программой?",
+                  "ffmpeg.exe and ffprobe.exe were found neither next to the program nor in PATH, "
+                  + "and no video opens without them.\n\nDownload the ffmpeg build from gyan.dev "
+                  + "(about 115 MB) and put it next to the program?"),
             "VideoTrim", MessageBoxButton.YesNo, MessageBoxImage.Question);
 
         if (answer != MessageBoxResult.Yes)
         {
-            Say("Без ffmpeg видео не открывается: ffmpeg.exe и ffprobe.exe нужно положить рядом с программой или добавить в PATH");
+            Say(Loc.P("Без ffmpeg видео не открывается: ffmpeg.exe и ffprobe.exe нужно положить рядом с программой или добавить в PATH",
+                      "No video opens without ffmpeg: ffmpeg.exe and ffprobe.exe go next to the program or into PATH"));
             return;
         }
 
         _installing = true;
         UpdateEnabled();
-        Say("Загрузка ffmpeg…");
+        Say(Loc.P("Загрузка ffmpeg…", "Downloading ffmpeg…"));
         try
         {
             var progress = new Progress<double>(p =>
-                Say(p >= 0 ? $"Загрузка ffmpeg: {p * 100:0} %" : "Загрузка ffmpeg…"));
+                Say(Loc.P("Загрузка ffmpeg", "Downloading ffmpeg") + (p >= 0 ? $": {p * 100:0} %" : "…")));
             var dir = await FfmpegSetup.Install(progress, CancellationToken.None);
 
             _ffmpeg = Media.Find("ffmpeg");
             _ffprobe = Media.Find("ffprobe");
-            if (_ffmpeg == null || _ffprobe == null) throw new FileNotFoundException("exe не найдены после распаковки");
+            if (_ffmpeg == null || _ffprobe == null) throw new FileNotFoundException(Loc.P("exe не найдены после распаковки", "the exe files are missing after unpacking"));
 
             _encoders = Media.DetectEncoders(_ffmpeg);
-            Say("ffmpeg установлен в " + dir);
+            Say(Loc.P("ffmpeg установлен в ", "ffmpeg installed to ") + dir);
         }
         catch (Exception ex)
         {
-            Say($"Не удалось скачать ffmpeg: {ex.Message}. Сборку можно взять вручную на {FfmpegSetup.Page}");
+            Say(Loc.P($"Не удалось скачать ffmpeg: {ex.Message}. Сборку можно взять вручную на {FfmpegSetup.Page}",
+                      $"Could not download ffmpeg: {ex.Message}. The build can be taken by hand from {FfmpegSetup.Page}"));
         }
         finally
         {
@@ -330,7 +367,7 @@ public sealed partial class MainWindow : Window
         if (pendingPath != null && _ffmpeg != null) Open(pendingPath);
     }
 
-    async void Open(string path)
+    async void Open(string path, Restore? restore = null)
     {
         if (_exportCts != null || _installing) return;
         if (_ffprobe == null || _ffmpeg == null)
@@ -339,16 +376,17 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        Say("Чтение " + Path.GetFileName(path));
+        string reading = Loc.P("Чтение ", "Reading ") + Path.GetFileName(path);
+        Say(reading);
         VideoInfo info;
         try
         {
             info = await Media.Probe(_ffprobe, path);
-            if (info.Duration <= 0) throw new InvalidOperationException("длительность неизвестна");
+            if (info.Duration <= 0) throw new InvalidOperationException(Loc.P("длительность неизвестна", "the duration is unknown"));
         }
         catch (Exception ex)
         {
-            Say("Не удалось прочитать " + Path.GetFileName(path) + ": " + ex.Message);
+            Say(Loc.P("Не удалось прочитать ", "Could not read ") + Path.GetFileName(path) + ": " + ex.Message);
             return;
         }
 
@@ -365,6 +403,13 @@ public sealed partial class MainWindow : Window
         _media.Pause();   // открывает файл и показывает первый кадр
 
         _timeline.Reset(info.Duration, info.Height > 0 ? (double)info.Width / info.Height : 0);
+        if (restore != null && restore.Path == path)
+        {
+            _timeline.SetEnd(restore.End);
+            _timeline.SetStart(restore.Start);
+            _timeline.SetPosition(restore.Position);
+            _pendingSeek = restore.Position;
+        }
 
         ShowFile();
         Title = Path.GetFileName(path) + " — VideoTrim";
@@ -374,7 +419,7 @@ public sealed partial class MainWindow : Window
         LoadThumbs(info);
         await FillCodecs(info);
         UpdateEnabled();
-        if (_info == info && _status.Text.StartsWith("Чтение")) Say("");
+        if (_info == info && _status.Text == reading) Say("");
     }
 
     static string Describe(VideoInfo v)
@@ -382,18 +427,18 @@ public sealed partial class MainWindow : Window
         var parts = new List<string>
         {
             $"{v.Width}×{v.Height}",
-            v.Fps > 0 ? v.Fps.ToString("0.###", Ru) + " кадров/с" : "частота кадров неизвестна",
-            v.CodecName + (v.VideoBitrate > 0 ? ", " + Kbps(v.VideoBitrate) + (v.BitrateEstimated ? " (оценка)" : "") : "")
+            v.Fps > 0 ? Loc.T("info.fps", v.Fps.ToString("0.###", Num)) : Loc.T("info.fps.unknown"),
+            v.CodecName + (v.VideoBitrate > 0 ? ", " + Kbps(v.VideoBitrate) + (v.BitrateEstimated ? $" ({Loc.T("info.estimate")})" : "") : "")
         };
         if (v.AudioCodec != null)
-            parts.Add("звук " + Media.CodecName(v.AudioCodec) + (v.AudioBitrate > 0 ? ", " + Kbps(v.AudioBitrate) : ""));
+            parts.Add(Loc.T("info.audio", Media.CodecName(v.AudioCodec) + (v.AudioBitrate > 0 ? ", " + Kbps(v.AudioBitrate) : "")));
         parts.Add(TimeText.Format(v.Duration, v.Duration >= 3600, true));
         return string.Join("  ·  ", parts);
     }
 
     static string Kbps(long bps) => bps >= 10_000_000
-        ? (bps / 1e6).ToString("0.#", Ru) + " Мбит/с"
-        : (bps / 1000).ToString("0", Ru) + " кбит/с";
+        ? (bps / 1e6).ToString("0.#", Num) + " " + Loc.T("unit.mbps")
+        : (bps / 1000).ToString("0", Num) + " " + Loc.T("unit.kbps");
 
     async void LoadThumbs(VideoInfo info)
     {
@@ -438,7 +483,8 @@ public sealed partial class MainWindow : Window
         if (failed)
         {
             SetPlaying(false);
-            Say("Проигрыватель Windows этот формат не открывает: кадры показываются через ffmpeg, без воспроизведения");
+            Say(Loc.P("Проигрыватель Windows этот формат не открывает: кадры показываются через ffmpeg, без воспроизведения",
+                      "The Windows player cannot open this format: frames are shown through ffmpeg, without playback"));
         }
         _media.Visibility = Visibility.Collapsed;
         _still.Visibility = Visibility.Visible;
@@ -527,7 +573,7 @@ public sealed partial class MainWindow : Window
         }
         _startBox.Text = TimeText.Format(_timeline.Start, Hours, true);
         _endBox.Text = TimeText.Format(_timeline.End, Hours, true);
-        _length.Text = "Длина " + TimeText.Format(_timeline.End - _timeline.Start, Hours, true);
+        _length.Text = Loc.T("range.length", TimeText.Format(_timeline.End - _timeline.Start, Hours, true));
         UpdateEstimate();
     }
 
@@ -575,6 +621,35 @@ public sealed partial class MainWindow : Window
 
     void Say(string text) => _status.Text = text;
 
+    /// <summary>
+    /// The window is built once from fields that each hold one control, so a new language
+    /// means a new window: the same bounds, the same file, range and playhead. Settings in
+    /// the config carry over by themselves; the choices on the tabs that are not saved
+    /// return to their defaults.
+    /// </summary>
+    void SwitchLanguage(string code)
+    {
+        if (_rebuildingUi || code == Loc.Language) return;
+        if (_exportCts != null || _installing)
+        {
+            _rebuildingUi = true;
+            _language.SelectedItem = _language.Items.Cast<ComboBoxItem>().FirstOrDefault(i => (string)i.Tag == Loc.Language);
+            _rebuildingUi = false;
+            return;
+        }
+
+        _cfg.Language = code;
+        Loc.Load(code);
+        var restore = _info == null ? null
+            : new Restore(_info.Path, _timeline.Start, _timeline.End, _timeline.Position);
+
+        StoreGeometry();
+        var next = new MainWindow(null, _cfg, restore);
+        Application.Current.MainWindow = next;
+        next.Show();
+        Close();
+    }
+
     // ---------- окно ----------
 
     void RestoreGeometry()
@@ -597,6 +672,16 @@ public sealed partial class MainWindow : Window
         if (_cfg.Maximized) WindowState = WindowState.Maximized;
     }
 
+    void StoreGeometry()
+    {
+        var r = WindowState == WindowState.Normal ? new Rect(Left, Top, Width, Height) : RestoreBounds;
+        _cfg.Left = r.Left;
+        _cfg.Top = r.Top;
+        _cfg.Width = r.Width;
+        _cfg.Height = r.Height;
+        _cfg.Maximized = WindowState == WindowState.Maximized;
+    }
+
     void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
         if (_exportCts != null)
@@ -608,12 +693,7 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        var r = WindowState == WindowState.Normal ? new Rect(Left, Top, Width, Height) : RestoreBounds;
-        _cfg.Left = r.Left;
-        _cfg.Top = r.Top;
-        _cfg.Width = r.Width;
-        _cfg.Height = r.Height;
-        _cfg.Maximized = WindowState == WindowState.Maximized;
+        StoreGeometry();
         _cfg.Save();
 
         _thumbsCts?.Cancel();

@@ -17,6 +17,9 @@ public sealed class Config
     public int QualityLevel { get; set; } = 1;
     public bool CheckUpdates { get; set; }
 
+    /// <summary>Код языка строкой: язык, добавленный файлом, перечислением не записать.</summary>
+    public string? Language { get; set; }
+
     public double? Left { get; set; }
     public double? Top { get; set; }
     public double? Width { get; set; }

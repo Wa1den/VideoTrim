@@ -240,7 +240,7 @@ public static class TimeText
             ? $"{(int)ts.TotalHours}:{ts.Minutes:00}:{ts.Seconds:00}"
             : $"{(int)ts.TotalMinutes}:{ts.Seconds:00}";
         int tenth = (int)Math.Round((s - Math.Floor(s)) * 10);
-        if (tenths && tenth > 0) r += "," + tenth;
+        if (tenths && tenth > 0) r += (Loc.Language == "ru" ? "," : ".") + tenth;
         return r;
     }
 

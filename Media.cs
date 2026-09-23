@@ -22,9 +22,12 @@ public sealed record VideoInfo(
     public string CodecName => Media.CodecName(Codec);
 }
 
+/// <param name="Title">Формат и имя кодировщика, одинаковые на всех языках.</param>
+/// <param name="NoteKey">Ключ пояснения после запятой: чем кодирует, без потерь ли.</param>
 /// <param name="Bitrate">False where the encoder ignores -b:v (ProRes picks its rate from the profile).</param>
-public sealed record Encoder(string Name, string Codec, string Label, bool Hardware, bool Bitrate)
+public sealed record Encoder(string Name, string Codec, string Title, string? NoteKey, bool Hardware, bool Bitrate)
 {
+    public string Label => NoteKey == null ? Title : Title + ", " + Loc.T(NoteKey);
     public override string ToString() => Label;
 }
 
@@ -34,6 +37,7 @@ public enum OutputKind { Video, Gif, M4a, Mp3 }
 /// <param name="Kbps">null оставляет битрейт на усмотрение кодировщика.</param>
 /// <param name="Quality">Значение CRF, CQ или QP; при нём битрейт не задаётся.</param>
 /// <param name="Scale">null сохраняет исходный размер кадра.</param>
+/// <param name="Fps">null сохраняет исходную частоту кадров; для GIF задаётся всегда.</param>
 /// <param name="AudioEncoder">null копирует звук как есть.</param>
 public sealed record ExportOptions(
     OutputKind Kind,
@@ -41,6 +45,7 @@ public sealed record ExportOptions(
     long? Kbps,
     int? Quality,
     (int Width, int Height)? Scale,
+    double? Fps,
     bool Audio,
     Encoder? AudioEncoder,
     int? AudioKbps);
@@ -145,7 +150,7 @@ public static class Media
         var (code, json, err) = await Run(ffprobe,
             ["-v", "error", "-print_format", "json", "-show_format", "-show_streams", path]);
         if (code != 0)
-            throw new InvalidOperationException(LastLines(err, 1).Trim() is { Length: > 0 } m ? m : "ffprobe: код " + code);
+            throw new InvalidOperationException(LastLines(err, 1).Trim() is { Length: > 0 } m ? m : "ffprobe: " + Loc.P("код ", "exit code ") + code);
 
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
@@ -169,7 +174,7 @@ public static class Media
             }
 
         if (video is not JsonElement v)
-            throw new InvalidOperationException("в файле нет видеопотока");
+            throw new InvalidOperationException(Loc.P("в файле нет видеопотока", "the file has no video stream"));
 
         double duration = Dbl(format, "duration") ?? Dbl(v, "duration") ?? 0;
 
@@ -300,31 +305,31 @@ public static class Media
 
     static readonly Encoder[] Known =
     [
-        new("libx264", "h264", "H.264: x264, процессор", false, true),
-        new("h264_nvenc", "h264", "H.264: NVENC, видеокарта NVIDIA", true, true),
-        new("h264_qsv", "h264", "H.264: Quick Sync, графика Intel", true, true),
-        new("h264_amf", "h264", "H.264: AMF, видеокарта AMD", true, true),
-        new("libx265", "hevc", "H.265: x265, процессор", false, true),
-        new("hevc_nvenc", "hevc", "H.265: NVENC, видеокарта NVIDIA", true, true),
-        new("hevc_qsv", "hevc", "H.265: Quick Sync, графика Intel", true, true),
-        new("hevc_amf", "hevc", "H.265: AMF, видеокарта AMD", true, true),
-        new("libsvtav1", "av1", "AV1: SVT-AV1, процессор", false, true),
-        new("av1_nvenc", "av1", "AV1: NVENC, видеокарта NVIDIA", true, true),
-        new("av1_qsv", "av1", "AV1: Quick Sync, графика Intel", true, true),
-        new("av1_amf", "av1", "AV1: AMF, видеокарта AMD", true, true),
-        new("libaom-av1", "av1", "AV1: libaom, процессор, медленно", false, true),
-        new("libvpx-vp9", "vp9", "VP9: libvpx, процессор", false, true),
-        new("mpeg4", "mpeg4", "MPEG-4 Part 2", false, true),
-        new("prores_ks", "prores", "ProRes", false, false)
+        new("libx264", "h264", "H.264: x264", "hw.cpu", false, true),
+        new("h264_nvenc", "h264", "H.264: NVENC", "hw.nvidia", true, true),
+        new("h264_qsv", "h264", "H.264: Quick Sync", "hw.intel", true, true),
+        new("h264_amf", "h264", "H.264: AMF", "hw.amd", true, true),
+        new("libx265", "hevc", "H.265: x265", "hw.cpu", false, true),
+        new("hevc_nvenc", "hevc", "H.265: NVENC", "hw.nvidia", true, true),
+        new("hevc_qsv", "hevc", "H.265: Quick Sync", "hw.intel", true, true),
+        new("hevc_amf", "hevc", "H.265: AMF", "hw.amd", true, true),
+        new("libsvtav1", "av1", "AV1: SVT-AV1", "hw.cpu", false, true),
+        new("av1_nvenc", "av1", "AV1: NVENC", "hw.nvidia", true, true),
+        new("av1_qsv", "av1", "AV1: Quick Sync", "hw.intel", true, true),
+        new("av1_amf", "av1", "AV1: AMF", "hw.amd", true, true),
+        new("libaom-av1", "av1", "AV1: libaom", "hw.cpu.slow", false, true),
+        new("libvpx-vp9", "vp9", "VP9: libvpx", "hw.cpu", false, true),
+        new("mpeg4", "mpeg4", "MPEG-4 Part 2", null, false, true),
+        new("prores_ks", "prores", "ProRes", null, false, false)
     ];
 
     static readonly Encoder[] KnownAudio =
     [
-        new("aac", "aac", "AAC", false, true),
-        new("libmp3lame", "mp3", "MP3", false, true),
-        new("libopus", "opus", "Opus", false, true),
-        new("ac3", "ac3", "AC-3", false, true),
-        new("flac", "flac", "FLAC, без потерь", false, false)
+        new("aac", "aac", "AAC", null, false, true),
+        new("libmp3lame", "mp3", "MP3", null, false, true),
+        new("libopus", "opus", "Opus", null, false, true),
+        new("ac3", "ac3", "AC-3", null, false, true),
+        new("flac", "flac", "FLAC", "audio.lossless", false, false)
     ];
 
     /// <summary>
@@ -364,8 +369,6 @@ public static class Media
     }
 
     // ---------- экспорт ----------
-
-    public static readonly string[] QualityNames = ["Почти без потерь", "Высокое", "Среднее", "Низкое"];
 
     /// <summary>
     /// The value each quality level maps to for this encoder, and what the encoder calls it.
@@ -463,8 +466,10 @@ public static class Media
         }
 
         // setsar=1: без него плеер растянет кадр обратно к исходным пропорциям
-        if (o.Scale is (int w, int h))
-            a.AddRange(["-vf", $"scale={w}:{h}:flags=lanczos,setsar=1"]);
+        var filters = new List<string>();
+        if (o.Fps is double fps) filters.Add("fps=" + Sec(fps));
+        if (o.Scale is (int w, int h)) filters.Add($"scale={w}:{h}:flags=lanczos,setsar=1");
+        if (filters.Count > 0) a.AddRange(["-vf", string.Join(",", filters)]);
 
         a.AddRange(["-c:v", encoder.Name]);
         if (o.Quality is int q) a.AddRange(QualityArgs(encoder.Name, q));
@@ -513,7 +518,7 @@ public static class Media
             : "scale=iw:ih";
 
         a.AddRange(["-map", "0:v:0", "-an", "-vf",
-            $"fps={GifFps},{scale}:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=5",
+            $"fps={Sec(o.Fps ?? GifFps)},{scale}:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=5",
             "-loop", "0"]);
     }
 
