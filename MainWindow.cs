@@ -402,6 +402,9 @@ public sealed partial class MainWindow : Window
         _still.Source = null;
         _still.Visibility = Visibility.Collapsed;
         _placeholder.Visibility = Visibility.Collapsed;
+        // проигрыватель Windows метку поворота не читает, кадр из телефона без этого
+        // показывается как записан, а не как снят: вверх ногами или боком
+        _media.LayoutTransform = info.Rotation == 0 ? Transform.Identity : new RotateTransform(info.Rotation);
         _media.Source = new Uri(path);
         _media.Pause();   // открывает файл и показывает первый кадр
 

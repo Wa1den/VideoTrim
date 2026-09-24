@@ -17,7 +17,8 @@ public sealed record VideoInfo(
     long VideoBitrate,
     bool BitrateEstimated,
     string? AudioCodec,
-    long AudioBitrate)
+    long AudioBitrate,
+    int Rotation)
 {
     public string CodecName => Media.CodecName(Codec);
 }
@@ -179,7 +180,8 @@ public static class Media
         double duration = Dbl(format, "duration") ?? Dbl(v, "duration") ?? 0;
 
         int w = (int)(Lng(v, "width") ?? 0), h = (int)(Lng(v, "height") ?? 0);
-        if (Math.Abs(Rotation(v)) % 180 == 90) (w, h) = (h, w);
+        int rotation = Rotation(v);
+        if (rotation % 180 == 90) (w, h) = (h, w);
 
         double fps = Rate(Str(v, "avg_frame_rate")) ?? Rate(Str(v, "r_frame_rate")) ?? 0;
 
@@ -198,25 +200,38 @@ public static class Media
         }
 
         return new VideoInfo(path, duration, w, h, fps, Str(v, "codec_name") ?? "?",
-                             Math.Max(0, bitrate), estimated, audioCodec, audioBitrate);
+                             Math.Max(0, bitrate), estimated, audioCodec, audioBitrate, rotation);
     }
 
     static bool IsCover(JsonElement s) =>
         s.TryGetProperty("disposition", out var d) && d.TryGetProperty("attached_pic", out var a)
         && a.ValueKind == JsonValueKind.Number && a.GetInt32() == 1;
 
+    /// <summary>
+    /// How far the picture turns clockwise on display: 0, 90, 180 or 270. Phones store the
+    /// frame as the sensor saw it and put the turn into the display matrix, which ffprobe
+    /// reports counter-clockwise (-90 for an ordinary portrait video); the older "rotate"
+    /// tag counts clockwise.
+    /// </summary>
     static int Rotation(JsonElement s)
     {
+        int cw = 0;
+        bool found = false;
         if (s.TryGetProperty("side_data_list", out var list))
             foreach (var item in list.EnumerateArray())
                 if (item.TryGetProperty("rotation", out var r) && r.ValueKind == JsonValueKind.Number)
-                    return (int)r.GetDouble();
+                {
+                    cw = -(int)Math.Round(r.GetDouble());
+                    found = true;
+                    break;
+                }
 
-        if (s.TryGetProperty("tags", out var tags) && Str(tags, "rotate") is string t
+        if (!found && s.TryGetProperty("tags", out var tags) && Str(tags, "rotate") is string t
             && int.TryParse(t, NumberStyles.Integer, Inv, out int deg))
-            return deg;
+            cw = deg;
 
-        return 0;
+        // к ближайшей четверти оборота: других углов проигрыватели не показывают
+        return ((int)Math.Round(cw / 90.0) * 90 % 360 + 360) % 360;
     }
 
     static long? TagBps(JsonElement s)
