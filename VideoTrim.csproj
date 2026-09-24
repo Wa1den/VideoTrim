@@ -14,7 +14,7 @@
     <!-- ThemeMode (Fluent) is still marked experimental in .NET 9 -->
     <NoWarn>$(NoWarn);WPF0001</NoWarn>
 
-    <Version>1.1.1</Version>
+    <Version>1.1.2</Version>
     <Product>VideoTrim</Product>
     <Description>Обрезка видео через ffmpeg</Description>
   </PropertyGroup>
