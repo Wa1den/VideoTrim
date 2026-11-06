@@ -30,6 +30,7 @@ dotnet publish -c Release -r win-x64 --self-contained false -p:PublishSingleFile
 | --- | --- |
 | пробел | воспроизведение и пауза |
 | ← → | на секунду, с Shift на 10 |
+| Ctrl + ← →, `,` `.` | на кадр назад и вперёд |
 | I, O | начало и конец фрагмента на текущей позиции |
 | Home, End | к началу и концу фрагмента |
 

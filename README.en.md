@@ -31,6 +31,7 @@ handles snap to whole seconds; the end can match the end of the file.
 | --- | --- |
 | Space | play and pause |
 | ← → | one second, with Shift ten |
+| Ctrl + ← →, `,` `.` | one frame back and forward |
 | I, O | clip start and end at the current position |
 | Home, End | to the clip start and end |
 

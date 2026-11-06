@@ -16,7 +16,7 @@ public static class Loc
     /// Bumped whenever the built-in strings change: files on disk win over the built-ins,
     /// and without a new version an old file would hide a reworded label.
     /// </summary>
-    const string Version = "1";
+    const string Version = "2";
 
     const string VersionKey = "_version";
     const string NameKey = "_name";
@@ -193,9 +193,9 @@ public static class Loc
 
         ["play.toggle"] = "Воспроизведение и пауза, пробел",
         ["play.back"] = "−1 с",
-        ["play.back.note"] = "Стрелка влево, с Shift на 10 секунд",
+        ["play.back.note"] = "Стрелка влево, с Shift на 10 секунд. На кадр назад: Ctrl + стрелка влево или «,»",
         ["play.forward"] = "+1 с",
-        ["play.forward.note"] = "Стрелка вправо, с Shift на 10 секунд",
+        ["play.forward.note"] = "Стрелка вправо, с Shift на 10 секунд. На кадр вперёд: Ctrl + стрелка вправо или «.»",
 
         ["range.start"] = "Начало",
         ["range.end"] = "Конец",
@@ -297,9 +297,9 @@ public static class Loc
 
         ["play.toggle"] = "Play and pause, Space",
         ["play.back"] = "−1 s",
-        ["play.back.note"] = "Left arrow, with Shift by 10 seconds",
+        ["play.back.note"] = "Left arrow, with Shift by 10 seconds. One frame back: Ctrl + Left arrow or “,”",
         ["play.forward"] = "+1 s",
-        ["play.forward.note"] = "Right arrow, with Shift by 10 seconds",
+        ["play.forward.note"] = "Right arrow, with Shift by 10 seconds. One frame forward: Ctrl + Right arrow or “.”",
 
         ["range.start"] = "Start",
         ["range.end"] = "End",

@@ -298,7 +298,8 @@ public static class Media
     {
         var args = new List<string> { "-hide_banner", "-v", "error" };
         if (keyOnly) args.AddRange(["-skip_frame", "nokey", "-noaccurate_seek"]);
-        args.AddRange(["-ss", Sec(t), "-i", path, "-an", "-sn", "-dn", "-frames:v", "1"]);
+        // точность до микросекунды: три знака после запятой сдвигают точку на кадр при 60 fps
+        args.AddRange(["-ss", t.ToString("0.######", Inv), "-i", path, "-an", "-sn", "-dn", "-frames:v", "1"]);
         if (height > 0) args.AddRange(["-vf", $"scale=-2:{height}"]);
         args.AddRange(["-f", "image2pipe", "-c:v", "bmp", "-"]);
 

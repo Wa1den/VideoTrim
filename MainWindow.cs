@@ -50,7 +50,7 @@ public sealed partial class MainWindow : Window
 
     readonly TextBlock _fileName = new() { FontSize = Ui.TextSize, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis };
     readonly TextBlock _fileInfo = new() { FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis };
-    readonly TextBlock _time = new() { FontSize = Ui.TextSize, MinWidth = 96, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0) };
+    readonly TextBlock _time = new() { FontSize = Ui.TextSize, MinWidth = 140, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0) };
     readonly TextBlock _length = new() { FontSize = Ui.TextSize, VerticalAlignment = VerticalAlignment.Center };
     readonly TextBlock _status = new() { FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis, };
 
@@ -110,7 +110,12 @@ public sealed partial class MainWindow : Window
         _timeline.RangeChanged += ShowRange;
 
         WireExport();
-        _timeline.Scrubbing += on => { _scrubbing = on; UpdateMute(); };
+        _timeline.Scrubbing += on =>
+        {
+            _scrubbing = on;
+            UpdateMute();
+            if (!on && !_playing) RequestStill(_timeline.Position);
+        };
 
         _tick.Tick += (_, _) => OnTick();
         _tick.Start();
@@ -504,6 +509,13 @@ public sealed partial class MainWindow : Window
         if (!_stillBusy) _ = StillLoop();
     }
 
+    /// <summary>
+    /// Fetches the frame at the playhead through ffmpeg. Two uses: the only picture there is
+    /// when the Windows player cannot open the file, and the exact frame over the player
+    /// while paused. The player seeks to the keyframe neighbourhood and shows a frame one to
+    /// three before the asked one (measured on a 30 fps H.264 test file), so a step by one
+    /// frame was not seen at all, or seen as a step back.
+    /// </summary>
     async Task StillLoop()
     {
         _stillBusy = true;
@@ -512,8 +524,18 @@ public sealed partial class MainWindow : Window
             while (_stillWanted is double t && _info is VideoInfo info)
             {
                 _stillWanted = null;
-                var img = await Media.Grab(_ffmpeg!, info.Path, t, Math.Min(info.Height, 1080), keyOnly: false);
-                if (img != null && _info == info) _still.Source = img;
+
+                // ffmpeg отдаёт первый кадр не раньше заданного времени; четверть кадра
+                // назад попадает на кадр, начинающийся в этой точке, а не на следующий
+                double frame = info.Fps > 0 ? 1 / info.Fps : 1 / 30.0;
+                var img = await Media.Grab(_ffmpeg!, info.Path, Math.Max(0, t - frame / 4),
+                                           Math.Min(info.Height, 1080), keyOnly: false);
+                if (img == null || _info != info) continue;
+
+                _still.Source = img;
+                if (!_stillMode)
+                    _still.Visibility = !_playing && !_scrubbing && _stillWanted == null
+                        ? Visibility.Visible : Visibility.Collapsed;
             }
         }
         catch (Exception) { }
@@ -536,7 +558,11 @@ public sealed partial class MainWindow : Window
         if (!_mediaFailed) _media.Position = TimeSpan.FromSeconds(t);
         _timeline.SetPosition(t);
         ShowTime();
-        if (_stillMode) RequestStill(t);
+
+        // на паузе точный кадр приходит от ffmpeg; пока тянут отметку, показывает
+        // проигрыватель: он отвечает сразу, а ffmpeg не успевал бы за мышью
+        if (_stillMode || (!_playing && !_scrubbing)) RequestStill(t);
+        else if (!_stillMode) _still.Visibility = Visibility.Collapsed;
     }
 
     void TogglePlay()
@@ -552,6 +578,7 @@ public sealed partial class MainWindow : Window
     {
         _playing = on;
         if (on) _media.Play(); else _media.Pause();
+        if (on && !_stillMode) _still.Visibility = Visibility.Collapsed;
         UpdateMute();
         ((TextBlock)_playBtn.Content).Text = on ? "" : "";
     }
@@ -567,7 +594,7 @@ public sealed partial class MainWindow : Window
     {
         _time.Text = _info == null
             ? "0:00 / 0:00"
-            : TimeText.Format(_timeline.Position, Hours) + " / " + TimeText.Format(_info.Duration, Hours);
+            : TimeText.Format(_timeline.Position, Hours, true) + " / " + TimeText.Format(_info.Duration, Hours);
     }
 
     void ShowRange()
@@ -593,14 +620,38 @@ public sealed partial class MainWindow : Window
         _timeline.SetEnd(e > _info.Duration - 0.5 ? _info.Duration : e);
     }
 
+    /// <summary>
+    /// One frame back or forward, counted by the average frame rate: the position is put on
+    /// the nearest frame boundary first, so repeated steps do not drift off the frame grid.
+    /// For a variable rate phone video the step is the average frame, which may land on a
+    /// neighbouring frame rather than the very next one.
+    /// </summary>
+    void StepFrame(int direction)
+    {
+        if (_info == null) return;
+        if (_playing) SetPlaying(false);
+
+        double fps = _info.Fps > 0 ? _info.Fps : 30;
+        long frame = (long)Math.Round(_timeline.Position * fps) + direction;
+        Seek(frame / fps);
+    }
+
     void OnKey(object sender, KeyEventArgs e)
     {
         if (_info == null || Keyboard.FocusedElement is TextBox or ComboBox or ComboBoxItem) return;
 
+        bool ctrl = Keyboard.Modifiers.HasFlag(ModifierKeys.Control);
         double step = Keyboard.Modifiers.HasFlag(ModifierKeys.Shift) ? 10 : 1;
         switch (e.Key)
         {
             case Key.Space: TogglePlay(); break;
+            case Key.Left when ctrl: StepFrame(-1); break;
+            case Key.Right when ctrl: StepFrame(1); break;
+
+            // на этих клавишах нарисованы < и >, поэтому Shift не меняет действия
+            case Key.OemComma: StepFrame(-1); break;
+            case Key.OemPeriod: StepFrame(1); break;
+
             case Key.Left: Seek(_timeline.Position - step); break;
             case Key.Right: Seek(_timeline.Position + step); break;
             case Key.I: StartHere(); break;
