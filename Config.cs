@@ -26,8 +26,11 @@ public sealed class Config
     public double? Height { get; set; }
     public bool Maximized { get; set; }
 
-    static string FilePath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "VideoTrim", "config.json");
+    /// <summary>%AppData%\VideoTrim, or the folder given after --sandbox for a test run.</summary>
+    public static string Folder { get; set; } = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "VideoTrim");
+
+    static string FilePath => Path.Combine(Folder, "config.json");
 
     public static Config Load()
     {

@@ -48,6 +48,7 @@ public sealed partial class MainWindow
     readonly TextBlock _estimate = new() { FontSize = Ui.TextSize, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 12, 0) };
     readonly ProgressBar _progress = new() { Width = 160, Height = 8, MinHeight = 8, Maximum = 100, Margin = new Thickness(0, 0, 12, 0), VerticalAlignment = VerticalAlignment.Center };
     Button _exportBtn = null!, _cancelBtn = null!, _showBtn = null!;
+    Panel _tabBar = null!;
 
     List<Encoder> _audioEncoders = [];
     Encoder? _sameEncoder;
@@ -148,10 +149,12 @@ public sealed partial class MainWindow
         foreach (var r in AudioRates) _audioRate.Items.Add(r);
         _audioRate.SelectedItem = 192;
 
-        return Ui.Card(Ui.SelectorBar(
+        var tabs = (StackPanel)Ui.SelectorBar(
             (Loc.T("tab.encoding"), video),
             (Loc.T("tab.video"), resolution),
-            (Loc.T("tab.audio"), audio)));
+            (Loc.T("tab.audio"), audio));
+        _tabBar = (Panel)tabs.Children[0];
+        return Ui.Card(tabs);
     }
 
     /// <summary>
@@ -626,6 +629,13 @@ public sealed partial class MainWindow
         var output = Path.IsPathRooted(dlg.FileName)
             ? dlg.FileName
             : Path.Combine(dlg.InitialDirectory ?? Path.GetDirectoryName(info.Path)!, dlg.FileName);
+        await Save(info, options, output);
+    }
+
+    /// <summary>The export after the file is chosen: by the dialog, or by a sandbox probe.</summary>
+    async Task Save(VideoInfo info, ExportOptions options, string output)
+    {
+        double start = _timeline.Start, end = _timeline.End;
         if (string.Equals(Path.GetFullPath(output), Path.GetFullPath(info.Path), StringComparison.OrdinalIgnoreCase))
         {
             Say(Loc.P("Фрагмент нельзя записать поверх исходного файла", "The clip cannot overwrite the source file"));
@@ -652,7 +662,7 @@ public sealed partial class MainWindow
 
         try
         {
-            var (code, _, err) = await Media.Run(_ffmpeg, args, _exportCts.Token, line =>
+            var (code, _, err) = await Media.Run(_ffmpeg!, args, _exportCts.Token, line =>
             {
                 if (line.StartsWith("out_time_us=") && long.TryParse(line.AsSpan(12), out long us))
                 {
@@ -673,7 +683,9 @@ public sealed partial class MainWindow
             {
                 TryDelete(output);
                 Say(Loc.P("ffmpeg завершился с ошибкой, файл не сохранён", "ffmpeg stopped with an error, the file is not saved"));
-                MessageBox.Show(this, Media.LastLines(err, 8), Loc.P("Ошибка ffmpeg", "ffmpeg error"), MessageBoxButton.OK, MessageBoxImage.Error);
+                // окно сообщения в песочнице вышло бы на передний план, текст идёт в ответ пробы
+                if (App.Sandbox != null) Say(Media.LastLines(err, 8).Replace('\n', ' '));
+                else MessageBox.Show(this, Media.LastLines(err, 8), Loc.P("Ошибка ffmpeg", "ffmpeg error"), MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
         catch (OperationCanceledException)

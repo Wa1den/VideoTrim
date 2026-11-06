@@ -63,6 +63,10 @@ public sealed partial class MainWindow : Window
     VideoInfo? _info;
     bool _playing, _mediaFailed, _stillMode, _rebuildingUi, _scrubbing;
     CancellationTokenSource? _thumbsCts;
+    Task _thumbs = Task.CompletedTask;
+
+    /// <summary>Done once the window has opened the file it was started with, if any.</summary>
+    readonly TaskCompletionSource _ready = new();
 
     // кадр для запасного показа: запрошенная позиция и признак, что ffmpeg уже занят
     double? _stillWanted;
@@ -83,6 +87,7 @@ public sealed partial class MainWindow : Window
         RestoreGeometry();
         Ui.WatchTheme(this);
         SetupChrome();
+        if (App.Sandbox != null) PlaceOutOfSight();
         try { Icon = BitmapFrame.Create(new Uri("pack://application:,,,/icon.ico")); } catch (Exception) { }
 
         _openBtn = Ui.Btn(Loc.T("app.open"), PickFile);
@@ -129,7 +134,7 @@ public sealed partial class MainWindow : Window
         };
         Drop += (_, e) =>
         {
-            if (e.Data.GetData(DataFormats.FileDrop) is string[] { Length: > 0 } files) Open(files[0]);
+            if (e.Data.GetData(DataFormats.FileDrop) is string[] { Length: > 0 } files) _ = Open(files[0]);
         };
         Closing += OnClosing;
 
@@ -140,11 +145,12 @@ public sealed partial class MainWindow : Window
         UpdateEnabled();
         ShowTime();
 
-        Loaded += (_, _) =>
+        Loaded += async (_, _) =>
         {
-            if (_ffmpeg == null || _ffprobe == null) OfferFfmpeg(path);
-            else if (path != null) Open(path, _restore);
             if (_cfg.CheckUpdates) CheckUpdates();
+            if (_ffmpeg == null || _ffprobe == null) OfferFfmpeg(path);
+            else if (path != null) await Open(path, _restore);
+            _ready.TrySetResult();
         };
     }
 
@@ -299,7 +305,7 @@ public sealed partial class MainWindow : Window
                      + Loc.P("Все файлы", "All files") + "|*.*",
             InitialDirectory = Directory.Exists(_cfg.OpenDir) ? _cfg.OpenDir : ""
         };
-        if (dlg.ShowDialog(this) == true) Open(dlg.FileName);
+        if (dlg.ShowDialog(this) == true) _ = Open(dlg.FileName);
     }
 
     /// <summary>
@@ -329,7 +335,8 @@ public sealed partial class MainWindow : Window
     {
         if (_installing) return;
 
-        var answer = MessageBox.Show(this,
+        // в песочнице вопрос не задаётся: окно сообщения вышло бы на передний план
+        var answer = App.Sandbox != null ? MessageBoxResult.No : MessageBox.Show(this,
             Loc.P("ffmpeg.exe и ffprobe.exe не найдены ни рядом с программой, ни в PATH, а без них "
                   + "видео не открывается.\n\nСкачать сборку ffmpeg с gyan.dev (около 115 МБ) и положить "
                   + "её рядом с программой?",
@@ -372,10 +379,10 @@ public sealed partial class MainWindow : Window
             UpdateEnabled();
         }
 
-        if (pendingPath != null && _ffmpeg != null) Open(pendingPath);
+        if (pendingPath != null && _ffmpeg != null) _ = Open(pendingPath);
     }
 
-    async void Open(string path, Restore? restore = null)
+    async Task Open(string path, Restore? restore = null)
     {
         if (_exportCts != null || _installing) return;
         if (_ffprobe == null || _ffmpeg == null)
@@ -427,7 +434,7 @@ public sealed partial class MainWindow : Window
 
         ShowRange();
         ShowTime();
-        LoadThumbs(info);
+        _thumbs = LoadThumbs(info);
         await FillCodecs(info);
         UpdateEnabled();
         if (_info == info && _status.Text == reading) Say("");
@@ -451,7 +458,7 @@ public sealed partial class MainWindow : Window
         ? (bps / 1e6).ToString("0.#", Num) + " " + Loc.T("unit.mbps")
         : (bps / 1000).ToString("0", Num) + " " + Loc.T("unit.kbps");
 
-    async void LoadThumbs(VideoInfo info)
+    async Task LoadThumbs(VideoInfo info)
     {
         _thumbsCts?.Cancel();
         var cts = _thumbsCts = new CancellationTokenSource();

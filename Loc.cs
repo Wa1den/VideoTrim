@@ -29,8 +29,13 @@ public static class Loc
     static string[] _available = BuiltinCodes;
     static readonly Dictionary<string, string> _names = new();
 
-    public static string Directory { get; } = Path.Combine(
+    public static string Directory { get; private set; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "VideoTrim", "lang");
+
+    public static void Configure(string directory)
+    {
+        if (!string.IsNullOrWhiteSpace(directory)) Directory = directory;
+    }
 
     public static string[] Available => _available;
 
